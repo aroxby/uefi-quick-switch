@@ -1,13 +1,25 @@
+#include <cstdint>
+#include <iomanip>
 #include <iostream>
 #include <ranges>
+#include <sstream>
 #include <windows.h>
 #include <processthreadsapi.h>
 using namespace std;
 
+
+constexpr int MAX_LOAD_OPTIONS = UINT16_MAX;
+typedef uint16_t LoadOptionId;
+struct LoadOption {
+    uint32_t attributes;
+    uint16_t filePathListLength;
+    wchar_t description[];
+};
+
+
 // Based on:
 // https://github.com/microsoft/Windows-classic-samples/blob/98185/Samples/ManagementInfrastructure/cpp/Process/Provider/WindowsProcess.c#L49
-BOOL EnablePrivilege()
-{
+BOOL EnablePrivilege() {
     LUID PrivilegeRequired;
     DWORD dwLen = 0, iCount = 0;
     BOOL bRes = FALSE;
@@ -80,9 +92,16 @@ DWORD GetUEFIVar(const char *varName, auto &buffer) {
     return length;
 }
 
+string optionNameFromId(LoadOptionId i) {
+    stringstream s;
+    s << "Boot" << hex << setw(4) << setfill('0') << uppercase << i;
+    return move(s.str());
+}
+
 int conmain() {
-    DWORD BootOrderContentLength;
-    WORD BootOrderContent[32];
+    LoadOptionId BootOrder[MAX_LOAD_OPTIONS];
+    uint8_t LoadOptionBuffer[1024];
+    DWORD BootOrderLength;
     DWORD err;
 
     if (!EnablePrivilege()) {
@@ -105,18 +124,21 @@ int conmain() {
     BootNext NV, BS, RT The boot option for the next boot only.
     BootOrder NV, BS, RT The ordered boot option load list
     */
-    BootOrderContentLength = GetUEFIVar("BootOrder", BootOrderContent);
-    if (BootOrderContentLength == 0) {
+    BootOrderLength = GetUEFIVar("BootOrder", BootOrder);
+    if (BootOrderLength == 0) {
         return 2;
     }
 
-
-    cout << "BootOrder content length: " << BootOrderContentLength << endl;
-    cout << "BootOrder content (hex): ";
-    for(auto e: BootOrderContent | std::views::take(BootOrderContentLength / sizeof(BootOrderContent[0]))) {
-        cout << hex << e << " ";
+    cout << "BootOrder:\n";
+    for(auto e: BootOrder | std::views::take(BootOrderLength / sizeof(BootOrder[0]))) {
+        const char *optionName = optionNameFromId(e).c_str();
+        cout << optionName << endl;
+        auto len = GetUEFIVar(optionName, LoadOptionBuffer);
+        if (len == 0) {
+            return 3;
+        }
+        wcout << ((LoadOption*)LoadOptionBuffer)->description << endl;
     }
-    cout << endl;
 
     return 0;
 }
