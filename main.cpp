@@ -82,12 +82,14 @@ BOOL enablePrivilege() {
     return bRes;
 }
 
-DWORD getUEFIVar(const char *varName, auto &buffer) {
+DWORD getUEFIVar(const char *varName, auto &buffer, bool required = true) {
     DWORD length = GetFirmwareEnvironmentVariableA(varName, EFI_GLOBAL_VARIABLE_GUID, buffer, sizeof(buffer));
     if (length == 0) {
         DWORD err = GetLastError();
         if (err == ERROR_ENVVAR_NOT_FOUND) {
-            cerr << "GetFirmwareEnvironmentVariable failed because the variable was not found." << endl;
+            if (required) {
+                cerr << "GetFirmwareEnvironmentVariable failed because the variable was not found." << endl;
+            }
         } else {
             cerr << "GetFirmwareEnvironmentVariable failed with error code: " << err << endl;
         }
@@ -98,13 +100,13 @@ DWORD getUEFIVar(const char *varName, auto &buffer) {
 string optionNameFromId(LoadOptionId i) {
     stringstream s;
     s << "Boot" << hex << setw(4) << setfill('0') << uppercase << i;
-    return move(s.str());
+    return s.str();
 }
 
 int mainNoPause() {
     LoadOptionId bootOrder[MAX_LOAD_OPTIONS];
     uint8_t loadOptionBuffer[1024];
-    DWORD bootOrderLength;
+    DWORD bootOrderLength, bootNextLength;
     DWORD err;
 
     if (!enablePrivilege()) {
@@ -142,6 +144,11 @@ int mainNoPause() {
         cout << ">> Attributes: " << option->attributes << endl;
     }
 
+    bootNextLength = getUEFIVar("BootNext", loadOptionBuffer, false);
+    if (bootNextLength == 0) {
+        strcpy((char *)loadOptionBuffer, "(not set)");
+    }
+    cout << "BootNext: " << (char *)loadOptionBuffer << endl;
     return 0;
 }
 
