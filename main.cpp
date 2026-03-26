@@ -71,6 +71,12 @@ BOOL enablePrivilege() {
         }
     }
 
+    if (iCount == pPrivs->PrivilegeCount) {
+        // not found, no specific error
+        SetLastError(ERROR_SUCCESS);
+        bRes = FALSE;
+    }
+
     CloseHandle(hToken);
     HeapFree(GetProcessHeap(), 0, pBuffer);
     return bRes;
@@ -104,11 +110,8 @@ int mainNoPause() {
 
     if (!enablePrivilege()) {
         err = GetLastError();
-        // Technically, this error means "The data area passed to a system call is too small"
-        // but no amount of buffer space helps.
-        // Only running with administrator privileges allows this call to succeed.
-        // I don't know why.
-        if (err == ERROR_INSUFFICIENT_BUFFER) {
+        // When run without admin privileges the required system privilege doesn't exist but no error code is set.
+        if (err == ERROR_SUCCESS) {
             cerr << "This program must be run with administrator privileges." << endl;
         } else {
             cerr << "Failed to enable privilege with error code: " << err << endl;
