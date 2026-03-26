@@ -138,7 +138,9 @@ int mainNoPause() {
         if (len == 0) {
             return 3;
         }
-        wcout << ((LoadOption*)LoadOptionBuffer)->description << endl;
+        LoadOption *option = (LoadOption*)LoadOptionBuffer;
+        wcout << option->description << endl;
+        cout << "Attributes: " << option->attributes << endl;
     }
 
     return 0;
