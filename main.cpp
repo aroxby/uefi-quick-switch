@@ -19,15 +19,15 @@ struct LoadOption {
 
 // Based on:
 // https://github.com/microsoft/Windows-classic-samples/blob/98185/Samples/ManagementInfrastructure/cpp/Process/Provider/WindowsProcess.c#L49
-BOOL EnablePrivilege() {
-    LUID PrivilegeRequired;
+BOOL enablePrivilege() {
+    LUID privilegeRequired;
     DWORD dwLen = 0, iCount = 0;
     BOOL bRes = FALSE;
     HANDLE hToken = NULL;
     BYTE *pBuffer = NULL;
     TOKEN_PRIVILEGES* pPrivs = NULL;
 
-    bRes = LookupPrivilegeValue(NULL, SE_SYSTEM_ENVIRONMENT_NAME, &PrivilegeRequired);
+    bRes = LookupPrivilegeValue(NULL, SE_SYSTEM_ENVIRONMENT_NAME, &privilegeRequired);
     if(!bRes) {
         return FALSE;
     }
@@ -38,8 +38,7 @@ BOOL EnablePrivilege() {
     }
 
     bRes = GetTokenInformation(hToken, TokenPrivileges, NULL, 0, &dwLen);
-    if(bRes)
-    {
+    if(bRes) {
         CloseHandle(hToken);
         return FALSE;
     }
@@ -51,8 +50,7 @@ BOOL EnablePrivilege() {
     }
 
     bRes = GetTokenInformation(hToken, TokenPrivileges, pBuffer, dwLen, &dwLen);
-    if (!bRes)
-    {
+    if (!bRes) {
         CloseHandle(hToken);
         HeapFree(GetProcessHeap(), 0, pBuffer);
         return FALSE;
@@ -61,11 +59,11 @@ BOOL EnablePrivilege() {
     // Iterate through all the privileges and enable the one required
     bRes = FALSE;
     pPrivs = (TOKEN_PRIVILEGES*)pBuffer;
-    for(iCount = 0; iCount < pPrivs->PrivilegeCount; iCount++)
-    {
-        if (pPrivs->Privileges[iCount].Luid.LowPart == PrivilegeRequired.LowPart &&
-          pPrivs->Privileges[iCount].Luid.HighPart == PrivilegeRequired.HighPart )
-        {
+    for(iCount = 0; iCount < pPrivs->PrivilegeCount; iCount++) {
+        if (
+            pPrivs->Privileges[iCount].Luid.LowPart == privilegeRequired.LowPart &&
+            pPrivs->Privileges[iCount].Luid.HighPart == privilegeRequired.HighPart
+        ) {
             pPrivs->Privileges[iCount].Attributes |= SE_PRIVILEGE_ENABLED;
             // here it's found
             bRes = AdjustTokenPrivileges(hToken, FALSE, pPrivs, dwLen, NULL, NULL);
@@ -78,7 +76,7 @@ BOOL EnablePrivilege() {
     return bRes;
 }
 
-DWORD GetUEFIVar(const char *varName, auto &buffer) {
+DWORD getUEFIVar(const char *varName, auto &buffer) {
     constexpr const char *EFI_GLOBAL_VARIABLE_GUID = "{8BE4DF61-93CA-11D2-AA0D-00E098032B8C}";
     DWORD length = GetFirmwareEnvironmentVariableA(varName, EFI_GLOBAL_VARIABLE_GUID, buffer, sizeof(buffer));
     if (length == 0) {
@@ -98,13 +96,13 @@ string optionNameFromId(LoadOptionId i) {
     return move(s.str());
 }
 
-int conmain() {
+int mainNoPause() {
     LoadOptionId BootOrder[MAX_LOAD_OPTIONS];
     uint8_t LoadOptionBuffer[1024];
     DWORD BootOrderLength;
     DWORD err;
 
-    if (!EnablePrivilege()) {
+    if (!enablePrivilege()) {
         err = GetLastError();
         // Technically, this error means "The data area passed to a system call is too small"
         // but no amount of buffer space helps.
@@ -124,7 +122,7 @@ int conmain() {
     BootNext NV, BS, RT The boot option for the next boot only.
     BootOrder NV, BS, RT The ordered boot option load list
     */
-    BootOrderLength = GetUEFIVar("BootOrder", BootOrder);
+    BootOrderLength = getUEFIVar("BootOrder", BootOrder);
     if (BootOrderLength == 0) {
         return 2;
     }
@@ -133,7 +131,7 @@ int conmain() {
     for(auto e: BootOrder | std::views::take(BootOrderLength / sizeof(BootOrder[0]))) {
         const char *optionName = optionNameFromId(e).c_str();
         cout << optionName << endl;
-        auto len = GetUEFIVar(optionName, LoadOptionBuffer);
+        auto len = getUEFIVar(optionName, LoadOptionBuffer);
         if (len == 0) {
             return 3;
         }
@@ -144,7 +142,7 @@ int conmain() {
 }
 
 int main() {
-    int r = conmain();
+    int r = mainNoPause();
     system("pause");
     return r;
 }
