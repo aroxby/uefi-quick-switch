@@ -132,7 +132,7 @@ int mainNoPause() {
     }
 
     cout << "BootOrder:\n";
-    for (auto e : bootOrder | std::views::take(bootOrderLength / sizeof(bootOrder[0]))) {
+    for (auto e : bootOrder | views::take(bootOrderLength / sizeof(bootOrder[0]))) {
         const char *optionName = optionNameFromId(e).c_str();
         cout << "> " << optionName << ":" << endl;
         auto len = getUEFIVar(optionName, loadOptionBuffer);
