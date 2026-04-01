@@ -133,9 +133,9 @@ int mainNoPause() {
 
     cout << "BootOrder:\n";
     for (auto e : bootOrder | views::take(bootOrderLength / sizeof(bootOrder[0]))) {
-        const char *optionName = optionNameFromId(e).c_str();
+        string optionName = optionNameFromId(e);
         cout << "> " << optionName << ":" << endl;
-        auto len = getUEFIVar(optionName, loadOptionBuffer);
+        auto len = getUEFIVar(optionName.c_str(), loadOptionBuffer);
         if (len == 0) {
             return 3;
         }
