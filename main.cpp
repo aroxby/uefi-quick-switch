@@ -82,8 +82,8 @@ BOOL enablePrivilege() {
     return bRes;
 }
 
-DWORD getUEFIVar(const char *varName, auto &buffer, bool required = true) {
-    DWORD length = GetFirmwareEnvironmentVariableA(varName, EFI_GLOBAL_VARIABLE_GUID, buffer, sizeof(buffer));
+DWORD getUEFIVar(const char *varName, void *buffer, size_t bufferLength, bool required = true) {
+    DWORD length = GetFirmwareEnvironmentVariableA(varName, EFI_GLOBAL_VARIABLE_GUID, buffer, bufferLength);
     if (length == 0) {
         DWORD err = GetLastError();
         if (err == ERROR_ENVVAR_NOT_FOUND) {
@@ -103,14 +103,41 @@ string optionNameFromId(LoadOptionId i) {
     return s.str();
 }
 
-int mainNoPause() {
+void dumpBootNext() {
+    LoadOptionId bootNextId;
+    DWORD bootNextLength = getUEFIVar("BootNext", &bootNextId, sizeof(bootNextId), false);
+    string bootNextOption = bootNextLength == sizeof(bootNextId) ? optionNameFromId(bootNextId) : "(not set)";
+    cout << "BootNext: " << bootNextOption << endl;
+}
+
+int dumpBootOrder() {
     LoadOptionId bootOrder[MAX_LOAD_OPTIONS];
     uint8_t loadOptionBuffer[1024];
-    DWORD bootOrderLength, bootNextLength;
-    DWORD err;
 
+    DWORD bootOrderLength = getUEFIVar("BootOrder", bootOrder, sizeof(bootOrder));
+    if (bootOrderLength == 0) {
+        return 2;
+    }
+
+    cout << "BootOrder:\n";
+    for (auto e : bootOrder | views::take(bootOrderLength / sizeof(bootOrder[0]))) {
+        string optionName = optionNameFromId(e);
+        DWORD len = getUEFIVar(optionName.c_str(), loadOptionBuffer, sizeof(loadOptionBuffer));
+        if (len == 0) {
+            return 3;
+        }
+        LoadOption *option = (LoadOption *)loadOptionBuffer;
+        cout << optionName << ": ";
+        wcout << option->description << endl;
+    }
+
+    dumpBootNext();
+    return 0;
+}
+
+int mainNoPause(int argc, char *argv[]) {
     if (!enablePrivilege()) {
-        err = GetLastError();
+        DWORD err = GetLastError();
         // When run without admin privileges the required system privilege doesn't exist but no error code is set.
         if (err == ERROR_SUCCESS) {
             cerr << "This program must be run with administrator privileges." << endl;
@@ -120,40 +147,12 @@ int mainNoPause() {
         return 1;
     }
 
-    /*
-    Boot#### NV, BS, RT A boot load option. #### is a printed hex value. No 0x or h is
-    included in the hex value.
-    BootNext NV, BS, RT The boot option for the next boot only.
-    BootOrder NV, BS, RT The ordered boot option load list
-    */
-    bootOrderLength = getUEFIVar("BootOrder", bootOrder);
-    if (bootOrderLength == 0) {
-        return 2;
-    }
-
-    cout << "BootOrder:\n";
-    for (auto e : bootOrder | views::take(bootOrderLength / sizeof(bootOrder[0]))) {
-        string optionName = optionNameFromId(e);
-        cout << "> " << optionName << ":" << endl;
-        auto len = getUEFIVar(optionName.c_str(), loadOptionBuffer);
-        if (len == 0) {
-            return 3;
-        }
-        LoadOption *option = (LoadOption *)loadOptionBuffer;
-        wcout << L">> Description: " << option->description << endl;
-        cout << ">> Attributes: " << option->attributes << endl;
-    }
-
-    bootNextLength = getUEFIVar("BootNext", loadOptionBuffer, false);
-    if (bootNextLength == 0) {
-        strcpy((char *)loadOptionBuffer, "(not set)");
-    }
-    cout << "BootNext: " << (char *)loadOptionBuffer << endl;
-    return 0;
+    int rc = dumpBootOrder();
+    return rc;
 }
 
-int main() {
-    int r = mainNoPause();
+int main(int argc, char *argv[]) {
+    int r = mainNoPause(argc, argv);
     system("pause");
     return r;
 }
