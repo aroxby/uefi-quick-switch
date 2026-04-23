@@ -19,6 +19,32 @@ struct LoadOption {
     wchar_t description[];
 };
 
+struct LoadOptionParseResult {
+    bool success;
+    LoadOptionId value;
+
+    LoadOptionParseResult(const char *str) {
+        char *end;
+        auto ivalue = strtoul(str, &end, 16);
+        if (*end != '\0') {
+            cerr << "Invalid load option ID (provide hex value): " << str << endl;
+            success = false;
+            return;
+        }
+        if (ivalue > MAX_LOAD_OPTIONS) {
+            cerr << "Load option ID out of range (uint16_t): " << str << endl;
+            success = false;
+            return;
+        }
+        value = static_cast<LoadOptionId>(ivalue);
+        success = true;
+    }
+
+    operator bool() const { return success; }
+
+    operator LoadOptionId() const { return value; }
+};
+
 // Based on:
 // https://github.com/microsoft/Windows-classic-samples/blob/98185/Samples/ManagementInfrastructure/cpp/Process/Provider/WindowsProcess.c#L49
 BOOL enablePrivilege() {
@@ -97,6 +123,22 @@ DWORD getUEFIVar(const char *varName, void *buffer, size_t bufferLength, bool re
     return length;
 }
 
+bool setUEFIVar(const char *varName, void *buffer, size_t bufferLength, bool required = false) {
+    if (!SetFirmwareEnvironmentVariableA(varName, EFI_GLOBAL_VARIABLE_GUID, buffer, bufferLength)) {
+        DWORD err = GetLastError();
+        if (err == ERROR_ENVVAR_NOT_FOUND) {
+            if (required) {
+                cerr << "SetFirmwareEnvironmentVariable failed because the variable was not found." << endl;
+                return false;
+            }
+        } else {
+            cerr << "SetFirmwareEnvironmentVariable failed with error code: " << err << endl;
+            return false;
+        }
+    }
+    return true;
+}
+
 string optionNameFromId(LoadOptionId i) {
     stringstream s;
     s << "Boot" << hex << setw(4) << setfill('0') << uppercase << i;
@@ -116,7 +158,7 @@ int dumpBootOrder() {
 
     DWORD bootOrderLength = getUEFIVar("BootOrder", bootOrder, sizeof(bootOrder));
     if (bootOrderLength == 0) {
-        return 2;
+        return 12;
     }
 
     cout << "BootOrder:\n";
@@ -124,7 +166,7 @@ int dumpBootOrder() {
         string optionName = optionNameFromId(e);
         DWORD len = getUEFIVar(optionName.c_str(), loadOptionBuffer, sizeof(loadOptionBuffer));
         if (len == 0) {
-            return 3;
+            return 13;
         }
         LoadOption *option = (LoadOption *)loadOptionBuffer;
         cout << optionName << ": ";
@@ -133,6 +175,27 @@ int dumpBootOrder() {
 
     dumpBootNext();
     return 0;
+}
+
+int clearBootNext() {
+    bool rc = setUEFIVar("BootNext", nullptr, 0);
+    return rc ? 0 : 21;
+}
+
+int setBootNext(LoadOptionId id) {
+    bool rc = setUEFIVar("BootNext", &id, sizeof(id), true);
+    return rc ? 0 : 31;
+}
+
+bool checkArgCount(const char *operation, int argc, int min, int max) {
+    if (argc > max) {
+        cerr << "Too many arguments to '" << operation << "' operation." << endl;
+        return false;
+    } else if (argc < min) {
+        cerr << "Not enough arguments to '" << operation << "' operation." << endl;
+        return false;
+    }
+    return true;
 }
 
 int mainNoPause(int argc, char *argv[]) {
@@ -147,8 +210,54 @@ int mainNoPause(int argc, char *argv[]) {
         return 1;
     }
 
-    int rc = dumpBootOrder();
-    return rc;
+    const char *operation = argc > 1 ? argv[1] : "list";
+    if (!strcmp(operation, "list")) {
+        checkArgCount(operation, argc, 0, 2);
+        return dumpBootOrder();
+    } else if (!strcmp(operation, "clear")) {
+        checkArgCount(operation, argc, 0, 2);
+        int rc = dumpBootOrder();
+        if (rc != 0) {
+            cerr << "Failed to read BootOrder, not clearing BootNext." << endl;
+            return rc;
+        }
+        rc = clearBootNext();
+        if (rc == ERROR_SUCCESS) {
+            cout << "- Cleared BootNext -" << endl;
+            dumpBootNext();
+        }
+        return rc;
+    } else if (!strcmp(operation, "set")) {
+        if (!checkArgCount(operation, argc, 3, 3)) {
+            return 3;
+        }
+        cerr << "Will parse\n";
+        LoadOptionParseResult parseResult(argv[2]);
+        if (!parseResult) {
+            return 4;
+        }
+        if (dumpBootOrder() != 0) {
+            cerr << "Failed to read BootOrder, not setting BootNext." << endl;
+            return 5;
+        }
+        int rc = setBootNext(parseResult);
+        if (rc == ERROR_SUCCESS) {
+            cout << "- Set BootNext to " << argv[2] << " -" << endl;
+            dumpBootNext();
+        }
+        return rc;
+    } else if (!strcmp(operation, "help")) {
+        cout << "Usage: " << argv[0] << " [operation]\n\n"
+             << "Operations:\n"
+             << "  list                List current BootOrder and BootNext variables (default).\n"
+             << "  clear               Clear BootNext variable.\n"
+             << "  set <option_id>     Set BootNext to the specified load option ID (hex value, e.g. 0001).\n"
+             << "  help                Show this help message." << endl;
+        return 0;
+    } else {
+        cerr << "Unknown operation: " << operation << endl;
+        return 10;
+    }
 }
 
 int main(int argc, char *argv[]) {
