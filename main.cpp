@@ -10,13 +10,23 @@
 using namespace std;
 
 constexpr const char *EFI_GLOBAL_VARIABLE_GUID = "{8BE4DF61-93CA-11D2-AA0D-00E098032B8C}";
+constexpr int LOAD_OPTION_ACTIVE = 1;
 constexpr int MAX_LOAD_OPTIONS = UINT16_MAX;
 
 typedef uint16_t LoadOptionId;
+
 struct LoadOption {
     uint32_t attributes;
     uint16_t filePathListLength;
     wchar_t description[];
+};
+
+struct LoadOptionData {
+    LoadOptionId id;
+    uint32_t attributes;
+    wstring description;
+
+    bool isActive() const { return (attributes & LOAD_OPTION_ACTIVE) != 0; }
 };
 
 struct LoadOptionParseResult {
@@ -145,32 +155,56 @@ string optionNameFromId(LoadOptionId i) {
     return s.str();
 }
 
+bool getBootNext(LoadOptionId &bootNextId) {
+    DWORD bootNextLength = getUEFIVar("BootNext", &bootNextId, sizeof(bootNextId), false);
+    return bootNextLength == sizeof(bootNextId);
+}
+
 void dumpBootNext() {
     LoadOptionId bootNextId;
-    DWORD bootNextLength = getUEFIVar("BootNext", &bootNextId, sizeof(bootNextId), false);
-    string bootNextOption = bootNextLength == sizeof(bootNextId) ? optionNameFromId(bootNextId) : "(not set)";
+    bool found = getBootNext(bootNextId);
+    string bootNextOption = found ? optionNameFromId(bootNextId) : "(not set)";
     cout << "BootNext: " << bootNextOption << endl;
+}
+
+bool getBootOrder(LoadOptionId bootOrder[], size_t &bootOrderLength) {
+    bootOrderLength = getUEFIVar("BootOrder", bootOrder, bootOrderLength * sizeof(LoadOptionId), false);
+    bootOrderLength /= sizeof(LoadOptionId);
+    return bootOrderLength != 0;
+}
+
+bool getBootOption(LoadOptionId id, LoadOptionData &data) {
+    uint8_t loadOptionBuffer[4096];
+
+    string optionName = optionNameFromId(id);
+    DWORD len = getUEFIVar(optionName.c_str(), loadOptionBuffer, sizeof(loadOptionBuffer));
+    if (len == 0) {
+        return false;
+    }
+    LoadOption *option = (LoadOption *)loadOptionBuffer;
+    data = LoadOptionData{id, option->attributes, option->description};
+    return true;
 }
 
 int dumpBootOrder() {
     LoadOptionId bootOrder[MAX_LOAD_OPTIONS];
-    uint8_t loadOptionBuffer[1024];
 
-    DWORD bootOrderLength = getUEFIVar("BootOrder", bootOrder, sizeof(bootOrder));
-    if (bootOrderLength == 0) {
+    size_t bootOrderLength = ARRAYSIZE(bootOrder);
+    bool found = getBootOrder(bootOrder, bootOrderLength);
+    if (!found) {
         return 12;
     }
 
     cout << "BootOrder:\n";
-    for (auto e : bootOrder | views::take(bootOrderLength / sizeof(bootOrder[0]))) {
-        string optionName = optionNameFromId(e);
-        DWORD len = getUEFIVar(optionName.c_str(), loadOptionBuffer, sizeof(loadOptionBuffer));
-        if (len == 0) {
+    for (auto e : bootOrder | views::take(bootOrderLength)) {
+        LoadOptionData option;
+        found = getBootOption(e, option);
+        if (!found) {
             return 13;
         }
-        LoadOption *option = (LoadOption *)loadOptionBuffer;
-        cout << optionName << ": ";
-        wcout << option->description << endl;
+
+        cout << optionNameFromId(option.id) << ": ";
+        wcout << option.description << endl;
     }
 
     dumpBootNext();
